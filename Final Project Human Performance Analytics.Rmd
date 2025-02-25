@@ -1,0 +1,457 @@
+---
+title: "Human Performance Final Project"
+author: "Josh Garzaniti"
+date: "2025-01-27"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Install Libraries
+```{r}
+library(ggplot2)
+library(ggdark)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ltm)
+```
+
+#Read in the CSV Data
+```{r}
+#Link to Data
+#https://frontiersin.figshare.com/articles/dataset/Data_Sheet_1_Comparing_Mental_Health_of_Athletes_and_Non-athletes_as_They_Emerge_From_a_COVID-19_Pandemic_Lockdown_CSV/14623635?file=28085286
+
+#Data was collected between 23/06/2020-−13/07/2020
+
+Athletes = read.csv("C:/Human Performance Analytics/Data_Sheet_1_Comparing Mental Health of Athletes and Non-athletes as They Emerge From a COVID-19 Pandemic Lockdown.CSV")
+
+summary(Athletes)
+
+head(Athletes, 20)
+
+sum(is.na(Athletes))
+#753 NA's but more disturbing is the number of 999s we are seeing (those can't be accurate so I'm going to replace them with NA's and possibly impute)
+
+#Athletes[Athletes == 999] = NA
+
+#Let's look at it after:
+
+head(Athletes, 20)
+
+Athletes = Athletes%>%
+  mutate(Respondent.ID = as.factor(Respondent.ID))%>%
+  mutate(Survey.Date. = as.Date(Survey.Date.))%>%
+  mutate(Shielded. = as.factor(Shielded.))%>%
+  mutate(Athlete.Non.Athlete = factor(Athlete.Non.Athlete))%>%
+  mutate(Individual.Team.athlete. = as.factor(Individual.Team.athlete.))
+
+```
+
+
+#Cleaning up the data a little bit
+```{r}
+##I'm also noticing values that are way beyond 2 sd of what appears to be normative data within the df so what I want to do is throw out any insanely high values (possibly rows a whole since it looks like they got put in as an error)
+
+
+remove_outliers = function(Athletes, cols) {
+  # Subset only the specified columns
+  numeric_subset = Athletes[, cols]
+  
+  #Calculate column means and sds
+  col_means = sapply(numeric_subset, mean, na.rm = TRUE)
+  col_sds = sapply(numeric_subset, sd, na.rm = TRUE)
+  
+  #Make a mask for all numeric values that exist at least 3 sd within the mean 
+  mask = apply(numeric_subset, 1, function(row) {
+    all(abs(row - col_means) <= (3 * col_sds))
+  })
+  
+  #Filter my dataframe to protect masked cols
+  return(Athletes[mask, ])
+}
+
+#These are the columns where I'm noticing the outliers (all survey response q's )
+cols_to_check = 34:50
+
+
+athletes_cleaned = remove_outliers(Athletes, cols_to_check)
+
+
+athletes_cleaned
+
+```
+
+#EDA
+```{r}
+Country_during_Lockdown_table = table(athletes_cleaned$Country.During.Lockdown)
+
+Country_during_Lockdown_table
+#Renaming these for clarity
+athletes_cleaned = athletes_cleaned%>%
+  rename("Country" = Country.During.Lockdown)%>%
+  rename("Age" = Age.Group.)%>%
+  rename("Gender" = Gender.)%>%
+  rename("MentalHealth" = Mental.Health.Condition.)%>%
+  rename("Occupation" = Occupation.)%>%
+  rename("MaritalStatus" = Marital.Status.)%>%
+  rename("Smoker" = Smoking.Status.)%>%
+  rename("SleepHrs" = Hours.sleep.)%>%
+  rename("Shielded" = Shielded.)%>%
+  rename("SocialDistWeeks" = Weeks.Social.Distancing)%>%
+  rename("SizeOfLockdownBubble" = X..in.lockdown.bubble.)%>%
+  rename("Athlete" = Athlete.Non.Athlete)%>%
+  rename("AIMSScale" = AIMS_.TOTAL)%>%
+  rename("SocialIdentity" = Social.Identity)
+
+
+```
+The attached analysis reports states that: "A total of 753 participants over the age of 18 were recruited. Of these, nine respondents resided outside the United Kingdom or Ireland during lock down thus, were not considered in final analysis. This left 744 participants over the age of 18 to be included of which 558 lived in the United Kingdom and 186 in the Republic of Ireland (male athletes = 199, female athletes = 161, male non-athletes = 148, female non-athletes = 236)" So for interpretation of this project we'll consider the 511 1's to be from the UK, 168 2's to be from Ireland and all others to be outside from those two (4 might be Scotland). 
+```{r}
+age_breakdown_table = table(athletes_cleaned$Age)
+
+age_breakdown_table
+```
+
+Another thing to break down is the age group bins: since age wasn't given as a number but rather a level, I had to refer back to the attached article on what the bins represented:
+1- 18 to 20, 2- 21 to 30, 3- 31 to 40, 4- 41 to 50, 5- 51 to 60, 6- 61 to 70,7- 71+
+```{r}
+#Also wanted a breakdown of Athletes vs non athletes
+
+athlete_breakdown_table = table(athletes_cleaned$Athlete)
+
+athlete_breakdown_table
+```
+They made it so non-athletes were 2's in their data and athletes are 1, so I'm looking at going back and changing that to a binary logistic table with 1's representing athletes positively in the data frame and 0's being non athletes just for clarity purposes
+
+#Exploratory Visualizations
+Lets see if we can visualize any relationships between age and mental health/athlete and mental health and any other relationships in the data.
+```{r}
+age_mentalhealth = athletes_cleaned %>%
+  group_by(Age)%>%
+  summarize(mean_MHC_SF_OVERALL = mean(MHC.SF.OVERALL, na.rm = TRUE))
+
+Mental_Health_Age_plot = 
+  ggplot(age_mentalhealth, aes(x = Age, 
+                               y = mean_MHC_SF_OVERALL, 
+                               fill = Age)) +
+  geom_bar(stat = "identity") +
+  dark_theme_minimal() +
+  labs(title = "Age Category and Corresponding Mental Health Score",
+       x = "Age Category",
+       y = "MHC SF Overall")
+
+Mental_Health_Age_plot
+
+athleticstatus_mentalhealth = athletes_cleaned %>%
+  group_by(Athlete)%>%
+  summarize(mean_MHC_SF_OVERALL = mean(MHC.SF.OVERALL, na.rm = TRUE))
+
+Mental_Health_Atheletic_Status_plot = 
+  ggplot(athleticstatus_mentalhealth, aes(x = Athlete, 
+                               y = mean_MHC_SF_OVERALL, 
+                               fill = Athlete)) +
+  geom_bar(stat = "identity") +
+  dark_theme_minimal() +
+  labs(title = "Athletic Status and Corresponding Mental Health Score",
+       x = "Athletic Status",
+       y = "MHC SF Overall")
+
+Mental_Health_Atheletic_Status_plot
+
+Mental_Health_Sleep = 
+  ggplot(athletes_cleaned, 
+         mapping = aes(x = SleepHrs, y = MHC.SF.OVERALL))+
+  geom_point()+
+  geom_smooth()+
+  dark_theme_minimal()+
+  labs(title = "Hours of Sleep vs Mental Health Score",
+       x = "Sleep (In hours)",
+       y = "MHC SF Overall")
+
+Mental_Health_Sleep
+  
+```
+I used MHC.SF.Overall as a target variable here because it's the sum of the survey item variables listed in the data. This source: https://hqlo.biomedcentral.com/articles/10.1186/s12955-020-01546-2
+
+talks further about how you can breakdown the scoring both on a continuous level and also in intermediary responses. for EDA purposes, I will be looking at the continuous summation of respondant scores reflected in said columns, but know that it ranges from 0-70 and higher scores "indicates a higher level of positive mental health." 
+
+A few interesting takeaways here:
+
+So far it looks like age (at least in terms of the bin) has a positive takeaway on Mental Health (As you get older you learn to cope with stress, get wiser, have support systems in place etc...)
+
+In terms of the distribution between athletes and non athletes it looks like non athletes have an edge when it comes to positive mental health scores during the Covid pandemic (slight edge but something to look into) 
+
+Lastly for here it looks like there isn't a clear linear relationship between sleep and high mental health scores (bummer for all of us who crave sleep). If anything it looks like as you sleep more than 8 hours, there's more of a negative relationship with MHC Overall scores (makes sense though because who hasn't had those depression binges. But that's another thing to look into)
+
+#Going Forward
+
+
+Relationship MAP:
+
+
+Target Goal (MENTAL HEALTH).....how can we capture it? Well the MHC Overall Scores and associated wellbeing subcategory scores in our dataset: (Emotional Wellbeing, Happiness, Social Wellbeing, Satisfaction etc)
+
+
+What do we think impacts MENTAL HEALTH:
+Age ->Survey data on age bins 
+Gender -> survey response data on gender status
+Maybe Country -> survey response on which country they're from
+Diet -> either self taken assessments or physician data (fitbit helps for calories burned)
+Stressors -> a combination of how they respond to questions regarding work/school/life balance
+Support Systems -> how often do they go out (There's connectivity vars in our data or proxy vars: gaming hours vs practice hours inverse proxy in the form of sleep etc)
+Athletic Status -> quite simply whether they're an athlete or not but also min practice we can capture from coaching or any sort of organizational level
+Occupation -> self response or have companies submit employees for survey questionaires
+Time spent Social Distancing -> once again combination of physician data (whether they were on the record of testing positive x date and then we can find the time spent in isolation/research Ireland and the UK's 2020 guidelines for shielding and mandatory shielding etc/mean times)
+
+
+
+
+```{r}
+temp <- str_split(athletes_cleaned$MentalHealth, ",")
+
+res_mat <- as.data.frame(matrix(0, nrow = nrow(athletes_cleaned), ncol = length((unique(as.numeric(unlist(temp)))))))
+
+vals <- (unique(as.numeric(unlist(temp))))
+
+for(i in 1:nrow(athletes_cleaned)){
+  res_mat[i,vals %in% as.numeric(temp[[i]])] <- 1
+}
+
+names(res_mat) <- paste("x_", vals, sep = "")
+
+res_mat = res_mat%>%
+  rename("Mental_Health_x_999" = x_999)%>%
+  rename("Mental_Health_x_2" = x_2)%>%
+  rename("Mental_Health_x_3" = x_3)%>%
+  rename("Mental_Health_x_4" = x_4)%>%
+  rename("Mental_Health_x_5" = x_5)%>%
+  rename("Mental_Health_x_6" = x_6)%>%
+  rename("Mental_Health_x_7" = x_7)%>%
+  rename("Mental_Health_x_8" = x_8)
+
+
+```
+
+##Adding the binary mental health condition levels back to the original dataframe
+```{r}
+athletes_cleaned = cbind(athletes_cleaned, res_mat)
+
+athletes_cleaned = athletes_cleaned%>%
+   dplyr::select(-X, -MentalHealth)
+
+athletes_cleaned = athletes_cleaned%>%
+  dplyr::select(Respondent.ID, Athlete, Individual.Team.athlete., Gender, Age, Country, Occupation, Mental_Health_x_999, Mental_Health_x_2, Mental_Health_x_3, Mental_Health_x_4, Mental_Health_x_5, Mental_Health_x_6, Mental_Health_x_7, Mental_Health_x_8, MaritalStatus, Smoker, Five.Fruit.and.Veg, SleepHrs, Survey.Date., Shielded, Dates.Shielding.,
+SocialDistWeeks, SizeOfLockdownBubble, AIMSScale, MHC.SF.OVERALL, HADS.OVERALL, HADS.A.AVERAGE, HADS.D.AVERAGE,RES_TOTAL,LONE_.TOTAL, LONE_.Emotional, LONE_.Social, Psychological.Wellbeing, Emotional.Wellbeing, Social.Wellbeing, Exclusivity, Negative.Affectivity, SocialIdentity, I.consider.myself.an.athlete, I.have.many.goals.related.to.sport, most.of.my.friends.are.athletes, Sport.is.the.most.important.part.of.my.life, I.spend.more.time.thinking.about.sport.than.anything.else, I.feel.bad.about.myself.when.I.do.badly.in.sport, I.would.be.very.depressed.if.I.were.injured.and.could.not.compete.in.sport, What.sport.do.you.play.,Sport.level., Total.weekly.playing.hours, Weekly.training.hours, Weekly.competing.hours, Happy, Interested.in.life, Satisfied, That.you.had.something.important.to.contribute.to.society,
+That.you.belonged.to.a.community..like.a.social.group.or.your.neighbourhood.,
+That.our.society.is.becoming.a.better.place.for.people.like.you,
+That.people.are.basically.good,
+That.the.way.our.society.works.makes.sense.to.you, That.you.liked.most.parts.of.your.personality,
+Good.at.managing.the.responsibilities.of.your.daily.life,
+That.you.had.warm.and.trusting.relationships.with.others,
+That.you.had.experiences.that.challenged.you.to.grow.and.become.a.better.person,
+Confident.to.think.or.express.your.own.ideas.and.opinions,
+That.your.life.has.a.sense.of.direction.or.meaning.to.it,
+I.feel.tense.or..wound.up..,
+I.still.enjoy.the.things.I.used.to.enjoy.,
+I.get.a.sort.of.frightened.feeling.like..butterflies..in.my.stomach.,
+I.get.a.sort.of.frightened.feeling.as.if.something.awful.is.about.to.happen.,
+I.can.laugh.and.see.the.funny.side.of.things.,
+Worrying.thoughts.go.through.my.mind.,
+I.feel.cheerful.,
+I.can.sit.at.ease.and.feel.relaxed.,
+I.feel.as.if.I.am.slowed.down.,
+I.have.lost.interest.in.my.appearance.,
+I.look.forward.with.enjoyment.to.things.,
+I.get.sudden.feelings.of.panic.,
+I.can.enjoy.a.good.book.or.radio.or.TV.programme.,
+I.tend.to.bounce.back.quickly.after.hard.times,
+I.have.a.hard.time.making.it.through.stressful.events.,
+It.does.not.take.me.long.to.recover.from.a.stressful.event,
+It.is.hard.for.me.to.snap.back.when.something.bad.happens.,
+I.usually.come.through.difficult.times.with.little.trouble,
+I.tend.to.take.a.long.time.to.get.over.setbacks.in.my.life.,
+I.experience.a.general.sense.of.emptiness,
+I.miss.having.people.around,
+There.are.many.people.I.can.trust.completely.,
+I.often.feel.rejected,
+There.are.enough.people.I.feel.close.to.,
+There.are.plenty.of.people.I.can.rely.on.when.I.have.problems.
+)
+```
+#mutating columns to take care of our 999 issues
+
+```{r}
+athletes_cleaned = athletes_cleaned %>%
+  mutate(Individual.Team.athlete. = ifelse(Individual.Team.athlete. == 999, 0, Individual.Team.athlete.))%>%
+  mutate(Gender = ifelse(Dates.Shielding. == 999, NA, Dates.Shielding.))%>%
+  mutate(Gender = ifelse(Gender == 1, "Male", "Female"))%>%
+  mutate(AIMSScale = ifelse(AIMSScale == 999, NA, AIMSScale))%>%
+  mutate(HADS.OVERALL = ifelse(HADS.OVERALL == 999, NA, HADS.OVERALL))%>%
+  mutate(HADS.A.AVERAGE = ifelse(HADS.A.AVERAGE == 999, NA, HADS.A.AVERAGE))%>%
+  mutate(HADS.D.AVERAGE = ifelse(HADS.D.AVERAGE == 999, NA, HADS.D.AVERAGE))%>%
+  mutate(RES_TOTAL = ifelse(RES_TOTAL == 999, NA, RES_TOTAL))%>%
+  mutate(LONE_.TOTAL = ifelse(LONE_.TOTAL == 999, NA, LONE_.TOTAL))%>%
+  mutate(LONE_.Emotional = ifelse(LONE_.Emotional == 999, NA, LONE_.Emotional))%>%
+  mutate(LONE_.Social = ifelse(LONE_.Social == 999, NA, LONE_.Social))%>%
+  mutate(Exclusivity = ifelse(Exclusivity == 999, NA, Exclusivity))%>%
+  mutate(Negative.Affectivity = ifelse(Negative.Affectivity == 999, NA, Negative.Affectivity))%>%
+  mutate(SocialIdentity = ifelse(SocialIdentity == 999, NA, SocialIdentity))%>%
+  mutate(I.consider.myself.an.athlete = ifelse(I.consider.myself.an.athlete == 999, NA, I.consider.myself.an.athlete))%>%
+  mutate(I.have.many.goals.related.to.sport = ifelse(I.have.many.goals.related.to.sport == 999, NA, I.have.many.goals.related.to.sport))%>%
+  mutate(most.of.my.friends.are.athletes = ifelse(most.of.my.friends.are.athletes == 999, NA, most.of.my.friends.are.athletes))%>%
+  mutate(Sport.is.the.most.important.part.of.my.life = ifelse(Sport.is.the.most.important.part.of.my.life == 999, NA, Sport.is.the.most.important.part.of.my.life))%>%
+  mutate(I.spend.more.time.thinking.about.sport.than.anything.else = ifelse(I.spend.more.time.thinking.about.sport.than.anything.else == 999, NA, I.spend.more.time.thinking.about.sport.than.anything.else))%>%
+  mutate(I.feel.bad.about.myself.when.I.do.badly.in.sport = ifelse(I.feel.bad.about.myself.when.I.do.badly.in.sport == 999, NA, I.feel.bad.about.myself.when.I.do.badly.in.sport))%>%
+  mutate(I.would.be.very.depressed.if.I.were.injured.and.could.not.compete.in.sport = ifelse(I.would.be.very.depressed.if.I.were.injured.and.could.not.compete.in.sport == 999, NA, I.would.be.very.depressed.if.I.were.injured.and.could.not.compete.in.sport))%>%
+  mutate(What.sport.do.you.play. = ifelse(What.sport.do.you.play. == 999, NA, What.sport.do.you.play.))%>%
+  mutate(Sport.level. = ifelse(Sport.level. == 999, NA, Sport.level.))%>%
+  mutate(Total.weekly.playing.hours = ifelse(Total.weekly.playing.hours == 999, 0, Total.weekly.playing.hours))%>%
+  mutate(Weekly.training.hours = ifelse(Weekly.training.hours == 999, 0, Weekly.training.hours))%>%
+  mutate(Weekly.competing.hours = ifelse(Weekly.competing.hours == 999, 0, Weekly.competing.hours))%>%
+  mutate(I.feel.tense.or..wound.up.. = ifelse(I.feel.tense.or..wound.up.. == 999, NA, I.feel.tense.or..wound.up..))%>%
+  mutate(I.still.enjoy.the.things.I.used.to.enjoy. = ifelse(I.still.enjoy.the.things.I.used.to.enjoy. == 999, NA, I.still.enjoy.the.things.I.used.to.enjoy.))%>%
+  mutate(I.get.a.sort.of.frightened.feeling.like..butterflies..in.my.stomach. = ifelse(I.get.a.sort.of.frightened.feeling.like..butterflies..in.my.stomach. == 999, NA, I.get.a.sort.of.frightened.feeling.like..butterflies..in.my.stomach.))%>%
+  mutate(I.get.a.sort.of.frightened.feeling.as.if.something.awful.is.about.to.happen. = ifelse(I.get.a.sort.of.frightened.feeling.as.if.something.awful.is.about.to.happen. == 999, NA, I.get.a.sort.of.frightened.feeling.as.if.something.awful.is.about.to.happen.))%>%
+  mutate(I.can.laugh.and.see.the.funny.side.of.things. = ifelse(I.can.laugh.and.see.the.funny.side.of.things. == 999, NA, I.can.laugh.and.see.the.funny.side.of.things.))%>%
+  mutate(Worrying.thoughts.go.through.my.mind. = ifelse(Worrying.thoughts.go.through.my.mind. == 999, NA, Worrying.thoughts.go.through.my.mind.))%>%
+  mutate(I.feel.cheerful. = ifelse(I.feel.cheerful. == 999, NA, I.feel.cheerful.))%>%
+  mutate(I.can.sit.at.ease.and.feel.relaxed. = ifelse(I.can.sit.at.ease.and.feel.relaxed. == 999, NA, I.can.sit.at.ease.and.feel.relaxed.))%>%
+  mutate(I.feel.as.if.I.am.slowed.down. = ifelse(I.feel.as.if.I.am.slowed.down. == 999, NA, I.feel.as.if.I.am.slowed.down.))%>%
+  mutate(I.have.lost.interest.in.my.appearance. = ifelse(I.have.lost.interest.in.my.appearance. == 999, NA, I.have.lost.interest.in.my.appearance.))%>%
+  mutate(I.look.forward.with.enjoyment.to.things. = ifelse(I.look.forward.with.enjoyment.to.things. == 999, NA, I.look.forward.with.enjoyment.to.things.))%>%
+  mutate(I.get.sudden.feelings.of.panic. = ifelse(I.get.sudden.feelings.of.panic. == 999, NA, I.get.sudden.feelings.of.panic.))%>%
+  mutate(I.can.enjoy.a.good.book.or.radio.or.TV.programme. = ifelse(I.can.enjoy.a.good.book.or.radio.or.TV.programme. == 999, NA, I.can.enjoy.a.good.book.or.radio.or.TV.programme.))%>%
+  mutate(I.tend.to.bounce.back.quickly.after.hard.times = ifelse(I.tend.to.bounce.back.quickly.after.hard.times == 999, NA, I.tend.to.bounce.back.quickly.after.hard.times))%>%
+  mutate(I.have.a.hard.time.making.it.through.stressful.events. = ifelse(I.have.a.hard.time.making.it.through.stressful.events. == 999, NA, I.have.a.hard.time.making.it.through.stressful.events.))%>%
+  mutate(It.does.not.take.me.long.to.recover.from.a.stressful.event = ifelse(It.does.not.take.me.long.to.recover.from.a.stressful.event == 999, NA, It.does.not.take.me.long.to.recover.from.a.stressful.event))%>%
+  mutate(It.is.hard.for.me.to.snap.back.when.something.bad.happens. = ifelse(It.is.hard.for.me.to.snap.back.when.something.bad.happens. == 999, NA, It.is.hard.for.me.to.snap.back.when.something.bad.happens.))%>%
+  mutate(I.usually.come.through.difficult.times.with.little.trouble = ifelse(I.usually.come.through.difficult.times.with.little.trouble == 999, NA, I.usually.come.through.difficult.times.with.little.trouble))%>%
+  mutate(I.tend.to.take.a.long.time.to.get.over.setbacks.in.my.life. = ifelse(I.tend.to.take.a.long.time.to.get.over.setbacks.in.my.life. == 999, NA, I.tend.to.take.a.long.time.to.get.over.setbacks.in.my.life.))%>%
+  mutate(I.experience.a.general.sense.of.emptiness = ifelse(I.experience.a.general.sense.of.emptiness == 999, NA, I.experience.a.general.sense.of.emptiness))%>%
+  mutate(I.miss.having.people.around = ifelse(I.miss.having.people.around == 999, NA, I.miss.having.people.around))%>%
+  mutate(There.are.many.people.I.can.trust.completely. = ifelse(There.are.many.people.I.can.trust.completely. == 999, NA, There.are.many.people.I.can.trust.completely.))%>%
+  mutate(I.often.feel.rejected = ifelse(I.often.feel.rejected == 999, NA, I.often.feel.rejected))%>%
+  mutate(There.are.enough.people.I.feel.close.to. = ifelse(There.are.enough.people.I.feel.close.to. == 999, NA, There.are.enough.people.I.feel.close.to.))%>%
+  mutate(There.are.plenty.of.people.I.can.rely.on.when.I.have.problems. = ifelse(There.are.plenty.of.people.I.can.rely.on.when.I.have.problems. == 999, NA, There.are.plenty.of.people.I.can.rely.on.when.I.have.problems.))%>%
+  mutate(Individual.Team.athlete. = ifelse(Individual.Team.athlete. == 999, 0, Individual.Team.athlete.))
+
+athletes_cleaned = athletes_cleaned %>%
+  mutate(Gender = ifelse(is.na(Gender), "Male", Gender))%>%
+  mutate(Athlete = ifelse(Athlete == 2, 0, Athlete))%>%
+  mutate(Five.Fruit.and.Veg = ifelse(Five.Fruit.and.Veg == 2, 0, Five.Fruit.and.Veg))%>%
+  rename("HealthyDiet" = Five.Fruit.and.Veg)
+
+athletes_cleaned = athletes_cleaned%>%
+  mutate(Dates.Shielding. = ifelse(Dates.Shielding.==999,NA,Dates.Shielding.))
+
+#Mutating sport level to give us the actual ordered factors
+athletes_cleaned = athletes_cleaned%>%
+  mutate(Sport.level. = recode(Sport.level., 
+                              `1` = "non-elite", 
+                              `2` = "semi-elite", 
+                              `3` = "elite"))
+
+#Creating a dataframe for athletes and one for non-athletes
+athletes_only = athletes_cleaned%>%
+  filter(Athlete == 1)
+
+nonathletes_only = athletes_cleaned%>%
+  filter(Athlete == 0)
+
+#I'm still noticing some extremely high values in my dataset that I thought I filtered out 
+# for HADS.OVERALL   HADS.A.AVERAGE HADS.D.AVERAGE   RES_TOTAL
+
+remove_outliers = function(Athletes, cols) {
+  # Subset only the specified columns
+  numeric_subset = Athletes[, cols]
+  
+  #Calculate column means and sds
+  col_means = sapply(numeric_subset, mean, na.rm = TRUE)
+  col_sds = sapply(numeric_subset, sd, na.rm = TRUE)
+  
+  #Make a mask for all numeric values that exist at least 3 sd within the mean 
+  mask = apply(numeric_subset, 1, function(row) {
+    all(abs(row - col_means) <= (3 * col_sds))
+  })
+  
+  #Filter my dataframe to protect masked cols
+  return(Athletes[mask, ])
+}
+
+#These are the columns where I'm still noticing the outliers
+cols_to_check2 = 27:30
+
+
+athletes_cleaned = remove_outliers(athletes_cleaned, cols_to_check2)
+
+
+athletes_cleaned
+
+```
+
+## Running some Corr tests on Athletes_cleaned
+```{r}
+#Does being an athlete have an impact on overall mental health?
+#Using a bi-serial cor test because it's designed for binary to continuous var interactions
+athletevsnonathlete_MHC = biserial.cor(athletes_cleaned$MHC.SF.OVERALL, athletes_cleaned$Athlete)
+
+athletevsnonathlete_MHC 
+#Very weak positive correlation between being an athlete and having increased MH scores
+cor.test(athletes_cleaned$Athlete, athletes_cleaned$MHC.SF.OVERALL) #not significant
+
+athletevsnonathlete_HADS = biserial.cor(athletes_cleaned$HADS.OVERALL, athletes_cleaned$Athlete)
+
+athletevsnonathlete_HADS 
+#Weak negative here 
+cor.test(athletes_cleaned$Athlete, athletes_cleaned$HADS.OVERALL) #Not significant
+
+athletevsnonathlete_RES = biserial.cor(athletes_cleaned$RES_TOTAL, athletes_cleaned$Athlete)
+
+athletevsnonathlete_RES 
+#Another weak negative 
+cor.test(athletes_cleaned$Athlete, athletes_cleaned$RES_TOTAL) #Is significant
+
+#Need to note there might be NA's in this col (confirmed there are 34)
+athletevsnonathlete_LONE = biserial.cor(athletes_cleaned$LONE_.TOTAL, athletes_cleaned$Athlete, use = "complete.obs")
+
+
+athletevsnonathlete_LONE 
+#Weak negative
+cor.test(athletes_cleaned$Athlete, athletes_cleaned$LONE_.TOTAL) #Not significant
+```
+#Still need to clean up some cols
+
+```{r}
+athletes_cleaned = athletes_cleaned %>%
+  mutate(Shielded = ifelse(Shielded == 2, 0, 1))%>%
+  mutate(Individual.Team.athlete. = case_when(
+    Individual.Team.athlete. == 0 ~ NA_real_,  
+    Individual.Team.athlete. == 1 ~ 0,        
+    Individual.Team.athlete. == 2 ~ 1))%>%
+  mutate(UKCountry = ifelse(Country == 2, 0, 1))%>%
+  mutate()
+```
+
+
+
+
+Let's just keep the non-survery repsonses to model off of since the measures are derived
+off of them
+##Non Survey Dataframe
+```{r}
+athletes_without_survey_questions = athletes_cleaned%>%
+  select(Respondent.ID, Athlete, Individual.Team.athlete., 
+         Gender, Age, Country, Occupation, Mental_Health_x_999, Mental_Health_x_2,
+         Mental_Health_x_3, Mental_Health_x_4, Mental_Health_x_5, Mental_Health_x_6,
+         Mental_Health_x_7, Mental_Health_x_8, MaritalStatus, Smoker, HealthyDiet,
+         SleepHrs, Survey.Date., )
+```
+
+
+
+
